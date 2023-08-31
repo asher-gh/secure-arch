@@ -208,8 +208,11 @@ Check UUID of your encrypted volume and write it to file you will edit next:
 
 Edit the file and fill with with kernel arguments:
 
+NOTE: I'm also including `amd_pstate=passive` for my machine. Check that
+your machine has CPPC enabled either in the BIOS or else by the vendor.
+
 	vim /etc/dracut.conf.d/cmdline.conf
-		kernel_cmdline="rd.luks.uuid=luks-YOUR_UUID rd.lvm.lv=vg/root root=/dev/mapper/vg-root rootfstype=ext4 rootflags=rw,relatime"
+		kernel_cmdline="rd.luks.uuid=luks-YOUR_UUID rd.lvm.lv=vg/root root=/dev/mapper/vg-root rootfstype=ext4 rootflags=rw,relatime amd_pstate=passive"
 
 Create file with flags:
 
