@@ -81,14 +81,6 @@ My pacstrap presents as follows:
 
     pacstrap /mnt base linux linux-firmware YOUR_UCODE_PACKAGE sudo vim lvm2 dracut sbsigntools iwd git efibootmgr binutils
 
-**Note:** `iwd` has an internal DSCP client that is disabled by default.
-To enable it, add this to the config at `/etc/iwd/main.conf`
-
-```
-[General]
-EnableNetworkConfiguration=true
-```
-
 Generate fstab:
 
     genfstab -U /mnt >> /mnt/etc/fstab
@@ -216,11 +208,12 @@ Check UUID of your encrypted volume and write it to file you will edit next:
 
 Edit the file and fill with with kernel arguments:
 
-NOTE: I'm also including `amd_pstate=passive` for my machine. Check that
-your machine has CPPC enabled either in the BIOS or else by the vendor.
+NOTE: Since linux 6.5 `amd_pstate_epp` is used by default. If using a
+version less than that it is recommended to include `amd_pstate=passive` for better cpu freqency management.
+Check that your machine has CPPC enabled either in the BIOS or else by the vendor.
 
     vim /etc/dracut.conf.d/cmdline.conf
-    	kernel_cmdline="rd.luks.uuid=luks-YOUR_UUID rd.lvm.lv=vg/root root=/dev/mapper/vg-root rootfstype=ext4 rootflags=rw,relatime amd_pstate=passive"
+    	kernel_cmdline="rd.luks.uuid=luks-YOUR_UUID rd.lvm.lv=vg/root root=/dev/mapper/vg-root rootfstype=ext4 rootflags=rw,relatime"
 
 Create file with flags:
 
