@@ -1,303 +1,452 @@
 # Introduction
 
-This section of guide will tell you how to install fully encrypted base system with SecureBoot enabled. This specific guide uses Unified Boot Image for booting and therefore there is no need for software like GRUB.
+This is a setup for dualbooting Windows 11 and encrypted Arch with secure boot.
+I'll be using systemd-boot as a bootloader.
+
+## References
+
+- [Systemd-boot](https://wiki.archlinux.org/title/Systemd-boot)
+- [dracut](https://wiki.archlinux.org/title/Dracut)
+- [Secure boot](https://wiki.archlinux.org/title/Unified_Extensible_Firmware_Interface/Secure_Boot#Using_your_own_keys)
+- [Secure ArchLinux Installation Tutorial part 1 - Base System](https://www.youtube.com/watch?v=4xeNL7nJLrM)
+
+## Prerequisites
+
+1. Create Windows 11 and Arch live USBs
+2. Backup important data.
 
 **Check this list before starting!**
 
 - Your computer supports SecureBoot/UEFI
 - Your computer allows for enrollment of your own secureboot keys
 - Your computer does not have manufacturer's backdoors
-- ~~You DO NOT need dualboot with windows~~ You can choose whether you want Microsoft CA when enrolling keys
 
-If you are not interested in SecureBoot, you can just skip last section of this document.
+If you are not interested in SecureBoot, you can just skip last section of this
+document.
 
-## YouTube version of this tutorial
+### Windows install
 
-I recorded a YT series where I follow all of these instructions. The installation there is performed on a real-life hardware. Check it out if you get stuck.
+- Delete all partitions and create a new partition with space for windows (this
+  will also create ESP and recovery partitions). I allocated half of the disk to
+  windows.
+- Disable fast start-up and hibernate (control panel > power options > choose
+  what the power button does)
+- reboot to check if windows is booting
 
-[Secure ArchLinux Installation Tutorial part 1 - Base System](https://www.youtube.com/watch?v=4xeNL7nJLrM)
+## Arch install
 
-## Preparing USB and booting the installer
+1. disable secure boot and clear keys
+2. _boot into live usb_
+3. connect to internet
 
-Download the latest Archlinux ISO and copy it to your USB:
+```sh
+$ iwctl
+$ station wlan0 get-networks
+$ station wlan0 connect SSSID
+```
 
-    sudo dd if=/path/to/file.iso of=/dev/sdX status=progress
-    sync
+4. ssh for easy copying and pasting
 
-Reboot your machine and if enabled, disable secureboot in BIOS. After that, boot ArchLinux USB.
+- get machines ip
 
-When your installer has booted, especially on laptop, you may want to enable WiFi connection:
+```sh
+$ ip a s
+```
 
-    iwctl
-    station wlan0 connect SSID
-    <password prompt>
-    exit
+- check sshd
 
-## Disk partitioning
+```sh
+$ systemctl status sshd
+```
 
-Following example assumes you have a nvme drive. Your drive may as well report as /dev/sdX.
+- set password for root user (for ssh)
 
-You can use your favoruite tool, that supports creating the GPT partiton, for example `gdisk`:
+```sh
+$ passwd
+<enter password>
+```
 
-    +----------------------+----------------------+----------------------+----------------------+
-    | EFI system partition |         LVM                                                        |
-    |                      |                                                                    |
-    | /efi                 |         /                                                          |
-    |                      |                                                                    |
-    | /dev/nvme0n1p1       |         /dev/vg/root                                               |
-    |                      |----------------------+----------------------+----------------------+
-    | unencrypted          | /dev/nvme0n1p2 encrypted using LUKS2                               |
-    +----------------------+--------------------------------------------------------------------+
+- ssh into the new machine
 
-My partition sizes and used partition codes look like this:
+```sh
+$ ssh root@<IP>
+```
 
-    /dev/nvme0n1p1 - EFI - 512MB;				partition code EF00
-    /dev/nvme0n1p2 - encrypted LUKS - remaining space;	partition code 8309
+5. Instead of partitioning the fresh disk(like in secure arch), we want to
+   create a partition from the remaining space. (confirm the disk with `lsblk`
+   first)
 
-The lack of SWAP partition is intentional; if you need it, you can configure SWAP as file in your filesystem later.
+```sh
+$ cgdisk /dev/nvme0n1
+```
 
-We also need to format EFI partition:
+Following the dual boot setup, the linux partitions will be `boot 512Mib` and
+`root ` in that order.
 
-    mkfs.fat -F32 /dev/nvme0n1p1
+```
+[new]
+> 512Mib
+> Enter
+> boot
+[new]
+> Enter
+> 8308
+> root
+[write]
+```
 
-Now we can create encrypted volume and open it (--perf options are optional and recommended for SSD):
+6. Encrypt `root` partition
 
-    cryptsetup luksFormat --type luks2 /dev/nvme0n1p2
-    cryptsetup open --perf-no_read_workqueue --perf-no_write_workqueue --persistent /dev/nvme0n1p2 cryptlvm
+```sh
+$ cryptsetup luksFormat --type luks2 /dev/nvme0n1p6
 
-Configuring LVM and formatting root partition:
+$ cryptsetup open --perf-no_read_workqueue --perf-no_write_workqueue --persistent /dev/nvme0n1p6 cryptlvm
 
-    pvcreate /dev/mapper/cryptlvm
-    vgcreate vg /dev/mapper/cryptlvm
-    lvcreate -l 100%FREE vg -n root
 
-    mkfs.ext4 /dev/vg/root
+$ pvcreate /dev/mapper/cryptlvm
+$ vgcreate vg /dev/mapper/cryptlvm
+$ lvcreate -l 100%FREE vg -n root
+```
 
-After all is done we need to mount our drives:
+7.  Format partitions
 
-    mount /dev/vg/root /mnt
-    mkdir -p /mnt/boot/efi
-    mount /dev/nvme0n1p1 /mnt/boot/efi
+```sh
+$ mkfs.ext4 /dev/nvme0n1p5
+$ mkfs.ext4 /dev/vg/root
+```
 
-## System bootstraping
+8. mount drives
 
-_In the next step it is recommended to install CPU microcode package. Depending on whether you have intel of amd you should apend intel-ucode or amd-ucode to your pacstrap_
+```sh
+$ mount /dev/vg/root /mnt
+$ mkdir -p /mnt/boot
+$ mount /dev/nvme0n1p5 /mnt/boot
+$ mkdir -p /mnt/boot/efi
+$ mount /dev/nvme0n1p1 /mnt/boot/efi
+```
 
-My pacstrap presents as follows:
+9. Modify pacman mirrorlist You can get the suitable mirrors for your region
+   from [https://archlinux.org/mirrorlist/].
 
-    pacstrap /mnt base linux linux-firmware YOUR_UCODE_PACKAGE sudo vim lvm2 dracut sbsigntools iwd git efibootmgr binutils
+```sh
+$ vim /etc/pacman.d/mirrorlist
 
-Generate fstab:
+## United Kingdom
+Server = https://archlinux.uk.mirror.allworldit.com/archlinux/$repo/os/$arch Server = https://mirror.bytemark.co.uk/archlinux/$repo/os/$arch
+Server = https://london.mirror.pkgbuild.com/$repo/os/$arch
+Server = https://mirrors.gethosted.online/archlinux/$repo/os/$arch
+Server = https://mirrors.melbourne.co.uk/archlinux/$repo/os/$arch
+Server = https://mirror.infernocomms.net/archlinux/$repo/os/$arch
+Server = https://www.mirrorservice.org/sites/ftp.archlinux.org/$repo/os/$arch
+Server = https://mirror.netweaver.uk/archlinux/$repo/os/$arch
+Server = https://lon.mirror.rackspace.com/archlinux/$repo/os/$arch
+Server = https://repo.slithery.uk/$repo/os/$arch
+Server = https://mirrors.ukfast.co.uk/sites/archlinux.org/$repo/os/$arch
+Server = https://mirror.cov.ukservers.com/archlinux/$repo/os/$arch
+Server = https://mirror.vinehost.net/archlinux/$repo/os/$arch
+```
 
-    genfstab -U /mnt >> /mnt/etc/fstab
+10. Install arch
 
-Now you can chroot to your system and perform some basic configuration:
+```sh
+$ pacstrap /mnt linux linux-firmware base base-devel UCODE_PACKAGE sudo vim lvm2 dracut sbsigntools git efibootmgr binutils networkmanager
+```
 
-    arch-chroot /mnt
+> NOTE: If using older arch ISO, might get an error like "signature from
+> "maintainer is unknown trust''. In that case update the keyring with
+> `pacman -sy archlinux-keyring`
 
-Set the root password:
+11. Generate fstab
 
-    passwd
+```sh
+$ genfstab -U /mnt >> /mnt/etc/fstab
+```
 
-My suggestion is to also install man for additional help you may require:
+12. `chroot` into installed system and basic configuration
 
-    pacman -Syu man-db
+```sh
+$ arch-chroot /mnt
+```
+
+Set root passwd
+
+```sh
+$ passwd
+```
 
 Set timezone and generate /etc/adjtime:
 
-    ln -sf /usr/share/zoneinfo/<Region>/<city> /etc/localtime
-    hwclock --systohc
+```sh
+$ ln -sf /usr/share/zoneinfo/<Region>/<city> /etc/localtime
+hwclock --systohc
+```
 
 Set your desired locale:
 
-    vim /etc/locale.gen # uncomment locales you want
-    locale-gen
+```sh
+$ vim /etc/locale.gen # uncomment locales you want
+$ locale-gen
 
-    vim /etc/locale.conf
-    	LANG=en_GB.UTF-8
-
-Configure your keyboard layout (mine is adapted to polish-programmer keyboard):
-
-    vim /etc/vconsole.conf
-    	KEYMAP=pl
-    	FONT=Lat2-Terminus16
-    	FONT_MAP=8859-2
+$ echo "LANG=en_GB.UTF-8" >> /etc/locale.conf
+```
 
 Set your hostname:
 
-    vim /etc/hostname
+```sh
+$ vim /etc/hostname
+```
+
+Configure your keyboard layout:
+
+```sh
+$ vim /etc/vconsole.conf
+
+	KEYMAP=pl
+	FONT=Lat2-Terminus16
+	FONT_MAP=8859-2
+```
 
 Create your user:
 
-    useradd -m YOUR_NAME
-    passwd YOUR_NAME
+```sh
+useradd -m -G wheel YOUR_NAME
+passwd YOUR_NAME
+```
 
 Add your user to sudo:
 
-    visudo
-    	%wheel	ALL=(ALL) ALL # Uncomment this line
+```sh
+$ visudo
 
-    usermod -aG wheel YOUR_NAME
+	%wheel	ALL=(ALL) ALL # Uncomment this line
+```
 
-Enable some basic systemd units:
+13. Create dracut scripts that will hook into pacman
 
-systemctl enable dhcpcd
-systemctl enable iwd
+```sh
+$ vim /usr/local/bin/dracut-install.sh
 
-## Creating Unified Kernel Image and configuring boot entry
+	#!/usr/bin/env bash
+	mkdir -p /boot/efi/EFI/Linux
+	while read -r line; do
+		if [[ "$line" == 'usr/lib/modules/'+([^/])'/pkgbase' ]]; then
+			kver="${line#'usr/lib/modules/'}"
+			kver="${kver%'/pkgbase'}"
+			dracut --force --uefi --kver "$kver" /boot/efi/EFI/Linux/arch-linux.efi
+		fi
+	done
+```
 
-Create dracut scripts that will hook into pacman:
+_And the removal script_
 
-    vim /usr/local/bin/dracut-install.sh
+```sh
+$ vim /usr/local/bin/dracut-remove.sh
 
-    	#!/usr/bin/env bash
-
-    	mkdir -p /boot/efi/EFI/Linux
-
-    	while read -r line; do
-    		if [[ "$line" == 'usr/lib/modules/'+([^/])'/pkgbase' ]]; then
-    			kver="${line#'usr/lib/modules/'}"
-    			kver="${kver%'/pkgbase'}"
-
-    			dracut --force --uefi --kver "$kver" /boot/efi/EFI/Linux/arch-linux.efi
-    		fi
-    	done
-
-And the removal script:
-
-    vim /usr/local/bin/dracut-remove.sh
-
-    	#!/usr/bin/env bash
-     	rm -f /boot/efi/EFI/Linux/arch-linux.efi
+	#!/usr/bin/env bash
+ 	rm -f /boot/efi/EFI/Linux/arch-linux.efi
+```
 
 Make those scripts executable and create pacman's hook directory:
 
-    chmod +x /usr/local/bin/dracut-*
+```sh
+$ chmod +x /usr/local/bin/dracut-*
+```
 
-mkdir /etc/pacman.d/hooks
+14. Now the actual hooks, first for the install and upgrade
 
-Now the actual hooks, first for the install and upgrade:
+```sh
+$ mkdir /etc/pacman.d/hooks`
+$ vim /etc/pacman.d/hooks/90-dracut-install.hook
 
-     vim /etc/pacman.d/hooks/90-dracut-install.hook
+	[Trigger]
+	Type = Path
+	Operation = Install
+	Operation = Upgrade
+	Target = usr/lib/modules/*/pkgbase
 
-    	[Trigger]
-    	Type = Path
-    	Operation = Install
-    	Operation = Upgrade
-    	Target = usr/lib/modules/*/pkgbase
+	[Action]
+	Description = Updating linux EFI image
+	When = PostTransaction
+	Exec = /usr/local/bin/dracut-install.sh
+	Depends = dracut
+	NeedsTargets
+```
 
-    	[Action]
-    	Description = Updating linux EFI image
-    	When = PostTransaction
-    	Exec = /usr/local/bin/dracut-install.sh
-    	Depends = dracut
-    	NeedsTargets
+_And for removal_
 
-And for removal:
+```sh
+$ vim /etc/pacman.d/hooks/60-dracut-remove.hook
 
-    vim /etc/pacman.d/hooks/60-dracut-remove.hook
+	[Trigger]
+	Type = Path
+	Operation = Remove
+	Target = usr/lib/modules/*/pkgbase
 
-    	[Trigger]
-    	Type = Path
-    	Operation = Remove
-    	Target = usr/lib/modules/*/pkgbase
-
-    	[Action]
-    	Description = Removing linux EFI image
-    	When = PreTransaction
-    	Exec = /usr/local/bin/dracut-remove.sh
-    	NeedsTargets
+	[Action]
+	Description = Removing linux EFI image
+	When = PreTransaction
+	Exec = /usr/local/bin/dracut-remove.sh
+	NeedsTargets
+```
 
 Check UUID of your encrypted volume and write it to file you will edit next:
 
-    blkid -s UUID -o value /dev/nvme0n1p2 >> /etc/dracut.conf.d/cmdline.conf
+```sh
+$ blkid -s UUID -o value /dev/nvme0n1p2 >> /etc/dracut.conf.d/cmdline.conf
+```
 
 Edit the file and fill with with kernel arguments:
 
-NOTE: Since linux 6.5 `amd_pstate_epp` is used by default. If using a
-version less than that it is recommended to include `amd_pstate=passive` for better cpu freqency management.
-Check that your machine has CPPC enabled either in the BIOS or else by the vendor.
+```sh
+$ vim /etc/dracut.conf.d/cmdline.conf
 
-    vim /etc/dracut.conf.d/cmdline.conf
-    	kernel_cmdline="rd.luks.uuid=luks-YOUR_UUID rd.lvm.lv=vg/root root=/dev/mapper/vg-root rootfstype=ext4 rootflags=rw,relatime"
+	kernel_cmdline="rd.luks.uuid=luks-YOUR_UUID rd.lvm.lv=vg/root root=/dev/mapper/vg-root rootfstype=ext4 rootflags=rw,relatime"
+```
+
+> NOTE: Since linux 6.5 `amd_pstate_epp` is used by default. If using a version
+> less than that it is recommended to include `amd_pstate=passive` for better
+> cpu freqency management. Check that your machine has CPPC enabled either in
+> the BIOS or else by the vendor.
 
 Create file with flags:
 
-    vim /etc/dracut.conf.d/flags.conf
-    	compress="zstd"
-    	hostonly="no"
+```sh
+$ vim /etc/dracut.conf.d/flags.conf
 
-Generate your image by re-installing `linux` package and making sure the hooks work properly:
+	compress="zstd"
+	hostonly="no"
+```
 
-    pacman -S linux
+15. Generate your image by re-installing `linux` package and making sure the
+    hooks work properly:
 
-You should have `arch-linux.efi` within your `/efi/EFI/Linux/`
+```sh
+$ pacman -S linux
+```
 
-Now you only have to add UEFI boot entry and create an order of booting:
+You should have `arch-linux.efi` within your `/efi/EFI/Linux/`. Now you only
+have to add UEFI boot entry and create an order of booting:
 
-    efibootmgr --create --disk /dev/nvme0n1 --part 1 --label "Arch Linux" --loader 'EFI\Linux\arch-linux.efi' --unicode
-    efibootmgr 		# Check if you have left over UEFI entries, remove them with efibootmgr -b INDEX -B and note down Arch index
-    efibootmgr -o ARCH_INDEX_FROM_PREVIOUS_COMMAND # 0 or whatever number your Arch entry shows as
+16. install systemd-boot
 
-Now you can reboot and log into your system.
+```sh
+$ bootctl install
+```
 
-:exclamation: :exclamation: :exclamation: **Compatilibity thing I noticed** :exclamation: :exclamation: :exclamation:
+17. Enable networkmanager service
 
-Some (older?) platforms can ignore entries by efibootmgr all together and just look for `EFI\BOOT\bootx64.efi`, in that case you may generate your UKI directly to that directory and under that name. It's very important that the name is also `bootx64.efi`.
+```sh
+$ systemctl enable NetworkManager
+```
 
-## SecureBoot
+18. Exit and unmount partitions
 
-At this point you should enable Setup Mode for SecureBoot in your BIOS, and erase your existing keys (it may spare you setting attributes for efi vars in OS). If your system does not offer reverting to default keys (useful if you want to install windows later), you should backup them, though this will not be described here.
+```sh
+$ exit
+$ umount -R /mnt
+```
 
-Configuring SecureBoot is easy with sbctl:
+## Secure Boot
 
-    pacman -S sbctl
+Enable Setup Mode for SecureBoot in your BIOS, and erase your existing keys (it
+may spare you setting attributes for efi vars in OS). If your system does not
+offer reverting to default keys (useful if you want to install windows later),
+you should backup them, though this will not be described here.
+
+19. Configuring SecureBoot is easy with sbctl:
+
+```sh
+$ pacman -S sbctl
+```
 
 Check your status, setup mode should be enabled (You can do that in BIOS):
 
-    sbctl status
-      Installed:      ✘ Sbctl is not installed
-      Setup Mode:     ✘ Enabled
-      Secure Boot:    ✘ Disabled
+```sh
+$ sbctl status
+	  Installed:      ✘ Sbctl is not installed
+	  Setup Mode:     ✘ Enabled
+	  Secure Boot:    ✘ Disabled
+```
 
-Create keys and sign binaries:
+20. Create keys and sign binaries:
 
-    sbctl create-keys
-    sbctl sign -s /boot/efi/EFI/Linux/arch-linux.efi #it should be single file with name verying from kernel version
+```sh
+$ sbctl create-keys
 
-Configure dracut to know where are signing keys:
+$ sbctl sign -s /boot/efi/EFI/Linux/arch-linux.efi #it should be single file with name verying from kernel version
+$ sbctl sign -s /usr/lib/systemd/boot/efi/systemd-bootx64.efi
+```
 
-    vim /etc/dracut.conf.d/secureboot.conf
-    	uefi_secureboot_cert="/usr/share/secureboot/keys/db/db.pem"
-    	uefi_secureboot_key="/usr/share/secureboot/keys/db/db.key"
+21. Automate systemd-boot update.
 
-We also need to fix sbctl's pacman hook. Creating the following file will overshadow the real one:
+The package
+[systemd-boot-pacman-hook](https://aur.archlinux.org/packages/systemd-boot-pacman-hook/)
+AUR adds a pacman hook which is executed every time
+[systemd](https://archlinux.org/packages/?name=systemd) is upgraded.
 
-    vim /etc/pacman.d/hooks/zz-sbctl.hook
-    	[Trigger]
-    	Type = Path
-    	Operation = Install
-    	Operation = Upgrade
-    	Operation = Remove
-    	Target = boot/*
-    	Target = efi/*
-    	Target = usr/lib/modules/*/vmlinuz
-    	Target = usr/lib/initcpio/*
-    	Target = usr/lib/**/efi/*.efi*
+Rather than installing _systemd-boot-pacman-hook_, you may prefer to manually
+place the following file in `/etc/pacman.d/hooks/`:
 
-    	[Action]
-    	Description = Signing EFI binaries...
-    	When = PostTransaction
-    	Exec = /usr/bin/sbctl sign /boot/efi/EFI/Linux/arch-linux.efi
+```sh
+/etc/pacman.d/hooks/95-systemd-boot.hook
 
-Enroll previously generated keys (drop microsoft option if you don't want their keys):
+[Trigger]
+Type = Package
+Operation = Upgrade
+Target = systemd
 
-    sbctl enroll-keys --microsoft
+[Action]
+Description = Gracefully upgrading systemd-boot...
+When = PostTransaction
+Exec = /usr/bin/systemctl restart systemd-boot-update.service
+```
 
-Reboot the system. Enable only UEFI boot in BIOS and set BIOS password so evil maid won't simply turn off the setting. If everything went fine you should first of all, boot into your system, and then verify with sbctl or bootctl:
+22. Configure dracut to know where are signing keys:
 
-    sbctl status
-      Installed:	✓ sbctl is installed
-      Owner GUID:	YOUR_GUID
-      Setup Mode:	✓ Disabled
-      Secure Boot:	✓ Enabled
+```sh
+$ vim /etc/dracut.conf.d/secureboot.conf
+	uefi_secureboot_cert="/usr/share/secureboot/keys/db/db.pem"
+	uefi_secureboot_key="/usr/share/secureboot/keys/db/db.key"
+```
+
+23. We also need to fix sbctl's pacman hook. Creating the following file will
+    overshadow the real one:
+
+```sh
+$ vim /etc/pacman.d/hooks/zz-sbctl.hook
+
+	[Trigger]
+	Type = Path
+	Operation = Install
+	Operation = Upgrade
+	Operation = Remove
+	Target = boot/*
+	Target = efi/*
+	Target = usr/lib/modules/*/vmlinuz
+	Target = usr/lib/initcpio/*
+	Target = usr/lib/**/efi/*.efi*
+
+	[Action]
+	Description = Signing EFI binaries...
+	When = PostTransaction
+	Exec = /usr/bin/sbctl sign-all -g
+```
+
+24. Enroll previously generated keys (drop microsoft option if you don't want
+    their keys):
+
+```sh
+$ sbctl enroll-keys -m
+```
+
+Reboot the system. Enable only UEFI boot in BIOS and set BIOS password so evil
+maid won't simply turn off the setting. If everything went fine you should first
+of all, boot into your system, and then verify with sbctl or bootctl:
+
+```sh
+sbctl status
+  Installed:	✓ sbctl is installed
+  Owner GUID:	YOUR_GUID
+  Setup Mode:	✓ Disabled
+  Secure Boot:	✓ Enabled
+```
