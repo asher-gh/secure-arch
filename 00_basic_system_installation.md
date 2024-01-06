@@ -86,7 +86,7 @@ Following the dual boot setup, the linux partitions will be `boot 512Mib` and
 ```
 [new]
 > Enter (start from the free space)
-> 512Mib 
+> 512Mib
 > Enter
 > boot
 [new]
@@ -257,7 +257,7 @@ $ chmod +x /usr/local/bin/dracut-*
 14. Now the actual hooks, first for the install and upgrade
 
 ```sh
-$ mkdir /etc/pacman.d/hooks`
+$ mkdir /etc/pacman.d/hooks
 $ vim /etc/pacman.d/hooks/90-dracut-install.hook
 
 	[Trigger]
@@ -326,8 +326,8 @@ $ vim /etc/dracut.conf.d/flags.conf
 $ pacman -S linux
 ```
 
-You should have `arch-linux.efi` within your `/efi/EFI/Linux/`. Now you only
-have to add UEFI boot entry and create an order of booting:
+You should have `arch-linux.efi` within your `/boot/efi/EFI/Linux/`. Now you
+only have to add UEFI boot entry and create an order of booting:
 
 16. install systemd-boot
 
@@ -377,6 +377,8 @@ $ sbctl create-keys
 
 $ sbctl sign -s /boot/efi/EFI/Linux/arch-linux.efi #it should be single file with name verying from kernel version
 $ sbctl sign -s /usr/lib/systemd/boot/efi/systemd-bootx64.efi
+$ bootctl remove
+$ bootctl install  # reinstall signed boot entries
 ```
 
 21. Automate systemd-boot update.
@@ -439,6 +441,20 @@ $ vim /etc/pacman.d/hooks/zz-sbctl.hook
 
 ```sh
 $ sbctl enroll-keys -m
+
+```
+
+25. Edit loader config
+
+_`esp`_`/loader/loader.conf`
+
+_`esp`_ is your `EFI system partition`, in this case, it's `/boot/efi`
+
+```sh
+default  arch.conf
+timeout  4
+console-mode max
+editor   no
 ```
 
 Reboot the system. Enable only UEFI boot in BIOS and set BIOS password so evil
