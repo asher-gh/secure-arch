@@ -85,10 +85,12 @@ Following the dual boot setup, the linux partitions will be `boot 512Mib` and
 
 ```
 [new]
-> 512Mib
+> Enter (start from the free space)
+> 512Mib 
 > Enter
 > boot
 [new]
+> Enter (start from free space)
 > Enter
 > 8308
 > root
@@ -154,7 +156,7 @@ $ pacstrap /mnt linux linux-firmware base base-devel UCODE_PACKAGE sudo vim lvm2
 
 > NOTE: If using older arch ISO, might get an error like "signature from
 > "maintainer is unknown trust''. In that case update the keyring with
-> `pacman -sy archlinux-keyring`
+> `pacman -Sy archlinux-keyring`
 
 11. Generate fstab
 
