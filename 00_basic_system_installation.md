@@ -372,13 +372,14 @@ $ sbctl status
 
 20. Create keys and sign binaries:
 
+We'll enroll efi file and the bootloader with `sbctl` which will automatically
+sign these using a pacman hook.
+
 ```sh
 $ sbctl create-keys
 
-$ sbctl sign -s /boot/efi/EFI/Linux/arch-linux.efi #it should be single file with name verying from kernel version
-$ sbctl sign -s /usr/lib/systemd/boot/efi/systemd-bootx64.efi
-$ bootctl remove
-$ bootctl install  # reinstall signed boot entries
+$ sbctl sign -s /boot/efi/EFI/Linux/arch-linux.efi
+$ sbctl sign -s /boot/efi/EFI/systemd/systemd-bootx64.efi
 ```
 
 21. Automate systemd-boot update.
