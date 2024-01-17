@@ -333,6 +333,7 @@ only have to add UEFI boot entry and create an order of booting:
 
 ```sh
 $ bootctl install
+$ systemctl enable systemd-boot-update.service
 ```
 
 17. Enable networkmanager service
@@ -379,31 +380,7 @@ sign these using a pacman hook.
 $ sbctl create-keys
 
 $ sbctl sign -s /boot/efi/EFI/Linux/arch-linux.efi
-$ sbctl sign -s /boot/efi/EFI/systemd/systemd-bootx64.efi
-```
-
-21. Automate systemd-boot update.
-
-The package
-[systemd-boot-pacman-hook](https://aur.archlinux.org/packages/systemd-boot-pacman-hook/)
-AUR adds a pacman hook which is executed every time
-[systemd](https://archlinux.org/packages/?name=systemd) is upgraded.
-
-Rather than installing _systemd-boot-pacman-hook_, you may prefer to manually
-place the following file in `/etc/pacman.d/hooks/`:
-
-```sh
-/etc/pacman.d/hooks/95-systemd-boot.hook
-
-[Trigger]
-Type = Package
-Operation = Upgrade
-Target = systemd
-
-[Action]
-Description = Gracefully upgrading systemd-boot...
-When = PostTransaction
-Exec = /usr/bin/systemctl restart systemd-boot-update.service
+$ sbctl sign -s /usr/lib/systemd/boot/efi/systemd-bootx64.efi
 ```
 
 22. Configure dracut to know where are signing keys:
